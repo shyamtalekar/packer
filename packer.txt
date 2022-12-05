@@ -1,0 +1,128 @@
+{
+  "variables": {
+    "aws_region": "{{env `AWS_REGION`}}",
+    "vpc_id": "{{env `VPC_ID`}}",
+    "subnet_id": "{{env `SUBNET_ID`}}",
+    "security_group_id": "{{env `SECURITY_GROUP_ID`}}",
+    "kms_key_id": "{{env `KMS_KEY_ID`}}",
+    "iam_instance_profile": "{{env `IAM_INSTANCE_PROFILE`}}",
+    "name": "{{env `NAME`}}",
+    "version": "{{env `VERSION`}}",
+    "base_ami_owner": "801119661308"
+  },
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "name": "{{user `name`}}",
+      "region": "{{user `aws_region`}}",
+      "encrypt_boot": "true",
+      "kms_key_id": "{{user `kms_key_id`}}",
+      "source_ami_filter": {
+        "filters": {
+          "virtualization-type": "hvm",
+          "architecture": "x86_64",
+          "name": "Windows_Server-2019-English-Full-Base-*",
+          "root-device-type": "ebs"
+        },
+        "owners": "{{user `base_ami_owner`}}",
+        "most_recent": true
+      },
+      "launch_block_device_mappings": [
+        {
+          "device_name": "/dev/sda1",
+          "delete_on_termination": "true",
+          "volume_size": 60,
+          "volume_type": "gp3"
+        }
+      ],
+      "instance_type": "t2.medium",
+      "user_data_file": "./scripts/ec2-userdata-winserver2016.ps1",
+      "iam_instance_profile": "{{user `iam_instance_profile`}}",
+      "security_group_id":"{{user `security_group_id`}}",
+      "vpc_id": "{{user `vpc_id`}}",
+      "subnet_id": "{{user `subnet_id`}}",
+      "communicator": "winrm",
+      "winrm_username": "Administrator",
+      "winrm_port": 5986,
+      "winrm_timeout": "15m",
+      "winrm_use_ssl": true,
+      "winrm_insecure": true,
+      "winrm_use_ntlm": true,
+      "ami_name": "alight_{{build_name}}_{{user `version` | clean_resource_name}}",
+      "ami_regions": "{{user `aws_region`}}",
+      "metadata_options": {
+        "http_endpoint": "enabled",
+        "http_tokens": "required",
+        "http_put_response_hop_limit": 1
+      },
+      "tags": {
+          "Name": "alight_{{build_name}}_{{user `version` | clean_resource_name}}",
+          "BaseSourceAMIName": "{{.SourceAMIName}}",
+          "BaseSourceAMI": "{{.SourceAMI}}",
+          "BaseSourceAMIOwner": "{{.SourceAMIOwner}}"
+      },
+      "run_tags": {
+        "Name": "Packer Builder - {{build_name}}",
+        "Owner": "CPE"
+      },
+      "ami_description": "Windows 2019 Server With CIS L1 Hardening"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "file",
+      "source": "./scripts/LaunchConfig.json",
+      "destination": "C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Config\\LaunchConfig.json"
+    },
+    {
+      "type": "file",
+      "source": "./scripts/install-puppet-catalog.ps1",
+      "destination": "C:\\Users\\Administrator\\install-puppet-catalog.ps1"
+    },
+    {
+      "type": "file",
+      "source": "./scripts/patch_os.ps1",
+      "destination": "C:\\Users\\Administrator\\patch_os.ps1"
+    },
+    {
+      "type": "powershell",
+      "elevated_user": "Administrator",
+      "elevated_password": "{{ build `Password` }}",
+      "environment_vars": [
+        "FACTER_ami_build=true"
+      ],
+      "inline": [
+        "mkdir C:\\Users\\Administrator\\DevOps",
+        "mv C:\\Users\\Administrator\\install-puppet-catalog.ps1 C:\\Users\\Administrator\\DevOps\\",
+        "C:\\Users\\Administrator\\DevOps\\install-puppet-catalog.ps1 -role base"
+      ]
+    },
+    {
+      "type": "powershell",
+      "elevated_user": "Administrator",
+      "elevated_password": "{{ build `Password` }}",
+      "inline": [
+        "mv C:\\Users\\Administrator\\patch_os.ps1 C:\\Users\\Administrator\\DevOps\\",        
+        "C:\\Users\\Administrator\\DevOps\\patch_os.ps1"
+      ]
+    },    
+    {  
+      "type": "windows-restart",  
+      "restart_check_command": "powershell -command \"& {Write-Output 'restarted.'}\""
+    },
+    {
+      "type": "powershell",
+      "inline": [
+        "C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Scripts\\InitializeInstance.ps1 -SchedulePerBoot",
+        "C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Scripts\\SysprepInstance.ps1 -NoShutdown"
+      ]
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "manifest",
+      "output": "manifest.json",
+      "strip_path": true
+    }
+  ]
+}
